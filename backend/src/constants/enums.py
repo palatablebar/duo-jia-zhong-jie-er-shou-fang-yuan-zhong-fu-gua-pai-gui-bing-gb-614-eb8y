@@ -55,6 +55,53 @@ LISTING_STATUS_ORDER: list[str] = [
 ]
 
 
+class IngestStage(StrEnum):
+    """采集分诊：完整 / 待补 / 不合规。只有 complete 且未撤回的记录可进入房源簇。"""
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    INVALID = "invalid"
+
+
+INGEST_STAGE_LABELS: dict[str, str] = {
+    IngestStage.COMPLETE.value: "完整",
+    IngestStage.INCOMPLETE.value: "待补",
+    IngestStage.INVALID.value: "不合规",
+}
+
+INGEST_STAGE_ORDER: list[str] = [
+    IngestStage.COMPLETE.value,
+    IngestStage.INCOMPLETE.value,
+    IngestStage.INVALID.value,
+]
+
+
+class BatchStatus(StrEnum):
+    """采集批次处理状态。"""
+
+    RECEIVED = "received"
+    PROCESSED = "processed"
+    FAILED = "failed"
+
+
+BATCH_STATUS_LABELS: dict[str, str] = {
+    BatchStatus.RECEIVED.value: "已接收",
+    BatchStatus.PROCESSED.value: "已处理",
+    BatchStatus.FAILED.value: "处理失败",
+}
+
+
+class CorrectionStatus(StrEnum):
+    APPLIED = "applied"
+    REJECTED = "rejected"
+
+
+CORRECTION_STATUS_LABELS: dict[str, str] = {
+    CorrectionStatus.APPLIED.value: "已应用",
+    CorrectionStatus.REJECTED.value: "已驳回",
+}
+
+
 class RunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"

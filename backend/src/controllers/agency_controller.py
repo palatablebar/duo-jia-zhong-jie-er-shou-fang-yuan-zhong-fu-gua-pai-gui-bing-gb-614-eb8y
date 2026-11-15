@@ -13,9 +13,15 @@ def list_agencies(db: Session, **filters) -> dict:
 
 def get_agency(db: Session, agency_id: int) -> dict:
     agency = agency_service.get_agency(db, agency_id)
-    stats = agency_service.listing_stats(db)
+    stats = agency_service.listing_stats(db).get(agency.id, {})
     return agency_service.serialize(
-        agency, stats.get(agency.id, {}).get("count", 0), stats.get(agency.id, {}).get("last_at")
+        agency,
+        stats.get("count", 0),
+        stats.get("last_at"),
+        complete_count=stats.get("complete", 0),
+        incomplete_count=stats.get("incomplete", 0),
+        invalid_count=stats.get("invalid", 0),
+        withdrawn_count=stats.get("withdrawn", 0),
     )
 
 
@@ -49,7 +55,13 @@ def update_agency(db: Session, agency_id: int, payload: dict, principal: dict, r
         ip=request.client.host if request.client else None,
     )
     db.commit()
-    stats = agency_service.listing_stats(db)
+    stats = agency_service.listing_stats(db).get(agency.id, {})
     return agency_service.serialize(
-        agency, stats.get(agency.id, {}).get("count", 0), stats.get(agency.id, {}).get("last_at")
+        agency,
+        stats.get("count", 0),
+        stats.get("last_at"),
+        complete_count=stats.get("complete", 0),
+        incomplete_count=stats.get("incomplete", 0),
+        invalid_count=stats.get("invalid", 0),
+        withdrawn_count=stats.get("withdrawn", 0),
     )

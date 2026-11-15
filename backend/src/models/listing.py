@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models import Base
@@ -40,6 +40,13 @@ class Listing(Base):
     orientation_norm: Mapped[str] = mapped_column(String(20), default="")
     title_tokens: Mapped[list] = mapped_column(JSON, default=list)
     parse_flags: Mapped[list] = mapped_column(JSON, default=list)
+
+    # 采集分诊（complete 完整 / incomplete 待补 / invalid 不合规）；只有 complete 且未撤回可入簇
+    ingest_stage: Mapped[str] = mapped_column(String(20), default="complete", index=True)
+    defect_flags: Mapped[list] = mapped_column(JSON, default=list)
+    ingest_batch: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    raw_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     property_id: Mapped[int | None] = mapped_column(
         ForeignKey("properties.id", ondelete="SET NULL"), nullable=True, index=True

@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import timedelta
 from statistics import median
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
@@ -61,6 +61,18 @@ def overview(db: Session) -> dict:
     agency_total = db.scalar(select(func.count()).select_from(Agency)) or 0
     pending_total = db.scalar(select(func.count()).select_from(Review).where(Review.status == "pending")) or 0
     properties = list(db.scalars(select(Property)).all())
+    all_listings = list(db.scalars(select(Listing)).all())
+
+    stage_rows = db.execute(select(Listing.ingest_stage, func.count()).group_by(Listing.ingest_stage)).all()
+    stage_counts = {key: count for key, count in stage_rows}
+    incomplete_total = stage_counts.get("incomplete", 0)
+    invalid_total = stage_counts.get("invalid", 0)
+    withdrawn_total = sum(1 for listing in all_listings if listing.withdrawn_at is not None)
+    eligible_total = sum(
+        1
+        for listing in all_listings
+        if listing.ingest_stage == "complete" and listing.status == "active" and listing.withdrawn_at is None
+    )
 
     level_rows = db.execute(select(Property.risk_level, func.count()).group_by(Property.risk_level)).all()
     level_counts = {key: count for key, count in level_rows}
@@ -70,7 +82,14 @@ def overview(db: Session) -> dict:
             tag_counter[tag] += 1
 
     agency_rows = db.execute(
-        select(Agency.code, Agency.name, Agency.kind, func.count(Listing.id))
+        select(
+            Agency.code,
+            Agency.name,
+            Agency.kind,
+            func.count(Listing.id),
+            func.sum(case((Listing.ingest_stage == "incomplete", 1), else_=0)),
+            func.sum(case((Listing.ingest_stage == "invalid", 1), else_=0)),
+        )
         .join(Listing, Listing.agency_id == Agency.id, isouter=True)
         .group_by(Agency.code, Agency.name, Agency.kind, Agency.id)
         .order_by(Agency.id)
@@ -95,10 +114,21 @@ def overview(db: Session) -> dict:
         "listing_total": listing_total,
         "cluster_total": cluster_total,
         "multi_cluster_total": multi_total,
-        "dedup_rate": round(1 - cluster_total / listing_total, 4) if listing_total else 0.0,
+        "dedup_rate": round(1 - cluster_total / eligible_total, 4) if eligible_total else 0.0,
         "risk_total": risk_total,
         "pending_total": pending_total,
         "agency_total": agency_total,
+        "stage": {
+            "complete": stage_counts.get("complete", 0),
+            "incomplete": incomplete_total,
+            "invalid": invalid_total,
+            "eligible": eligible_total,
+            "withdrawn": withdrawn_total,
+        },
+        "incomplete_total": incomplete_total,
+        "invalid_total": invalid_total,
+        "withdrawn_total": withdrawn_total,
+        "eligible_total": eligible_total,
         "unit_price_median": _unit_price_median(properties),
         "worker_alive": worker_alive(),
         "risk_levels": [
@@ -116,8 +146,15 @@ def overview(db: Session) -> dict:
             if tag_counter.get(tag)
         ],
         "agencies": [
-            {"code": code, "name": name, "kind": kind, "listing_count": count}
-            for code, name, kind, count in agency_rows
+            {
+                "code": code,
+                "name": name,
+                "kind": kind,
+                "listing_count": count,
+                "incomplete_count": incomplete_count or 0,
+                "invalid_count": invalid_count or 0,
+            }
+            for code, name, kind, count, incomplete_count, invalid_count in agency_rows
         ],
         "latest_run": {
             "id": latest_run.id,

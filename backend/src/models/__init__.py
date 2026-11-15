@@ -10,8 +10,21 @@ from src.models.user import User  # noqa: E402
 from src.models.audit import AuditLog  # noqa: E402
 from src.models.agency import Agency  # noqa: E402
 from src.models.listing import Listing  # noqa: E402
+from src.models.ingest_batch import IngestBatch  # noqa: E402
+from src.models.listing_correction import ListingCorrection  # noqa: E402
 from src.models.property import Property  # noqa: E402
 from src.models.match_run import MatchRun  # noqa: E402
 from src.models.review import Review  # noqa: E402
 
-__all__ = ["Base", "User", "AuditLog", "Agency", "Listing", "Property", "MatchRun", "Review"]
+__all__ = [
+    "Base",
+    "User",
+    "AuditLog",
+    "Agency",
+    "Listing",
+    "IngestBatch",
+    "ListingCorrection",
+    "Property",
+    "MatchRun",
+    "Review",
+]

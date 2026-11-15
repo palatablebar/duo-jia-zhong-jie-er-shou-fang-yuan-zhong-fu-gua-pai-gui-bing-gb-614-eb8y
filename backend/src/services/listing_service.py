@@ -4,10 +4,15 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from src.constants.enums import LISTING_STATUS_LABELS, RISK_TAG_LABELS
+from src.constants.enums import (
+    INGEST_STAGE_LABELS,
+    LISTING_STATUS_LABELS,
+    RISK_TAG_LABELS,
+)
 from src.models.agency import Agency
 from src.models.listing import Listing
 from src.models.property import Property
+from src.services import intake_service
 from src.utils.errors import not_found
 from src.utils.timeutil import iso_utc
 
@@ -43,6 +48,13 @@ def serialize(listing: Listing, agency: Agency | None = None, prop: Property | N
             "title_tokens": listing.title_tokens or [],
         },
         "parse_flags": listing.parse_flags or [],
+        "ingest_stage": listing.ingest_stage,
+        "ingest_stage_label": INGEST_STAGE_LABELS.get(listing.ingest_stage, listing.ingest_stage),
+        "defect_flags": listing.defect_flags or [],
+        "ingest_batch": listing.ingest_batch,
+        "can_merge": intake_service.can_merge(listing),
+        "withdrawn_at": iso_utc(listing.withdrawn_at),
+        "raw_payload": listing.raw_payload or {},
         "risk_tags": listing.risk_tags or [],
         "risk_labels": [RISK_TAG_LABELS.get(tag, tag) for tag in (listing.risk_tags or [])],
         "property_id": listing.property_id,
@@ -65,6 +77,7 @@ def list_listings(
     agency_id: int | None = None,
     status: str | None = None,
     risk: str | None = None,
+    stage: str | None = None,
     property_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
@@ -82,6 +95,9 @@ def list_listings(
     if status:
         stmt = stmt.where(Listing.status == status)
         count_stmt = count_stmt.where(Listing.status == status)
+    if stage:
+        stmt = stmt.where(Listing.ingest_stage == stage)
+        count_stmt = count_stmt.where(Listing.ingest_stage == stage)
     if risk == "bait":
         stmt = stmt.where(Listing.risk_tags.like('%"bait"%'))
         count_stmt = count_stmt.where(Listing.risk_tags.like('%"bait"%'))

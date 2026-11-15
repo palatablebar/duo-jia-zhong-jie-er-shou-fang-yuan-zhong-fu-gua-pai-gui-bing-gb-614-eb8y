@@ -1,8 +1,15 @@
 import { api } from '../api.js';
-import { ENUMS, can, statusTone } from '../config.js';
+import { ENUMS, can, stageTone, statusTone } from '../config.js';
 import { drawer, errorBox, errorMessage, esc, field, fmtTime, kv, table, toast } from '../ui.js';
 
 const state = { q: '', kind: '', enabled: '' };
+
+function stageBadges(agency) {
+  return `<span class="badge ${stageTone('complete')}">完整 ${esc(agency.complete_count ?? 0)}</span>
+    <span class="badge ${stageTone('incomplete')}">待补 ${esc(agency.incomplete_count ?? 0)}</span>
+    <span class="badge ${stageTone('invalid')}">不合规 ${esc(agency.invalid_count ?? 0)}</span>
+    ${agency.withdrawn_count ? `<span class="badge">撤回 ${esc(agency.withdrawn_count)}</span>` : ''}`;
+}
 
 function openAgency(view, ctx, agency) {
   const editable = can(ctx.user.role, 'agency:write');
@@ -14,6 +21,7 @@ function openAgency(view, ctx, agency) {
       ['采集入口', agency.endpoint ? `<span class="mono">${esc(agency.endpoint)}</span>` : '—'],
       ['负责人', esc(agency.owner)],
       ['状态', statusBadge(agency)],
+      ['采集分诊', stageBadges(agency)],
       ['最近采集', fmtTime(agency.last_listing_at || agency.last_synced_at)],
       ['采集口径', `<span class="mono">${esc(JSON.stringify(agency.config || {}))}</span>`],
       ['备注', esc(agency.note || '—')],
@@ -33,6 +41,7 @@ function openAgency(view, ctx, agency) {
         rows: data.items,
         columns: [
           { key: 'lid', label: '编号', className: 'mono' },
+          { key: 'stage', label: '分诊', render: (row) => `<span class="badge ${stageTone(row.ingest_stage)}">${esc(row.ingest_stage_label)}</span>` },
           { key: 'community_raw', label: '小区原文', render: (row) => esc(row.community_raw) },
           { key: 'area_raw', label: '面积原文', className: 'mono' },
           { key: 'price_raw', label: '价格原文', className: 'mono' },
@@ -132,6 +141,7 @@ export const agenciesPage = {
             { key: 'kind_label', label: '接入方式' },
             { key: 'endpoint', label: '采集入口', render: (row) => `<span class="mono muted">${esc(row.endpoint || '—')}</span>` },
             { key: 'listing_count', label: '挂牌数', className: 'num' },
+            { key: 'stage', label: '采集分诊', render: (row) => `<span class="badge ${stageTone('incomplete')}">待补 ${esc(row.incomplete_count || 0)}</span> <span class="badge ${stageTone('invalid')}">不合规 ${esc(row.invalid_count || 0)}</span>` },
             { key: 'last_listing_at', label: '最近采集', render: (row) => fmtTime(row.last_listing_at || row.last_synced_at) },
             { key: 'enabled', label: '状态', render: (row) => statusBadge(row) },
           ],

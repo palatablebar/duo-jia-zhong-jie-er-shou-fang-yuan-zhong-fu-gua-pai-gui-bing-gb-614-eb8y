@@ -69,12 +69,57 @@ CREATE TABLE listings (
     orientation_norm VARCHAR(20),
     title_tokens     JSON,
     parse_flags      JSON,
+    ingest_stage     VARCHAR(20)  NOT NULL DEFAULT 'complete',  -- complete / incomplete / invalid
+    defect_flags     JSON,                                  -- 阻断入簇的缺项标记
+    ingest_batch     VARCHAR(60),                            -- 采集批次号（同批重试幂等）
+    raw_payload      JSON,                                  -- 采集原文全量快照，补正不覆盖
+    withdrawn_at     DATETIME,                               -- 撤回时间；置位即出簇且不进银行清单
     property_id      INT,
     risk_tags        JSON,
     created_at       DATETIME     NOT NULL,
     updated_at       DATETIME     NOT NULL,
     CONSTRAINT uq_listings_agency_lid UNIQUE (agency_id, lid),
     CONSTRAINT fk_listings_agency FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE CASCADE
+);
+
+-- 采集批次台账（自然键 batch_no；同批重试不新增挂牌）
+CREATE TABLE ingest_batches (
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    batch_no         VARCHAR(60)  NOT NULL UNIQUE,
+    agency_id        INT,
+    agency_code      VARCHAR(40)  NOT NULL,
+    status           VARCHAR(20)  NOT NULL DEFAULT 'received',
+    received_count   INT          NOT NULL DEFAULT 0,
+    complete_count   INT          NOT NULL DEFAULT 0,
+    incomplete_count INT          NOT NULL DEFAULT 0,
+    invalid_count    INT          NOT NULL DEFAULT 0,
+    created_count    INT          NOT NULL DEFAULT 0,
+    updated_count    INT          NOT NULL DEFAULT 0,
+    unchanged_count  INT          NOT NULL DEFAULT 0,
+    retry_of         VARCHAR(60),
+    submitted_by     VARCHAR(160) NOT NULL,
+    note             TEXT,
+    last_error       TEXT,
+    extra            JSON,
+    processed_at     DATETIME,
+    created_at       DATETIME     NOT NULL,
+    updated_at       DATETIME     NOT NULL,
+    CONSTRAINT fk_ingest_batches_agency FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE SET NULL
+);
+
+-- 挂牌补正留痕（applied / rejected 均保留，补正失败不丢记录）
+CREATE TABLE listing_corrections (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id  INT          NOT NULL,
+    batch_no    VARCHAR(60),
+    field       VARCHAR(40)  NOT NULL,
+    before      VARCHAR(400),
+    after       VARCHAR(400),
+    status      VARCHAR(20)  NOT NULL DEFAULT 'applied',
+    reason      VARCHAR(400),
+    submitted_by VARCHAR(160) NOT NULL,
+    created_at  DATETIME     NOT NULL,
+    CONSTRAINT fk_corrections_listing FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
 );
 
 CREATE TABLE properties (

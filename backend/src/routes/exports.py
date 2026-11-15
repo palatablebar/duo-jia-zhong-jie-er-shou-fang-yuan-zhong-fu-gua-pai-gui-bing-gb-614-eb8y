@@ -20,6 +20,15 @@ def clusters_csv(
     return export_controller.clusters_csv(db, principal, request)
 
 
+@router.get("/bank-book.csv")
+def bank_book_csv(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: dict = Depends(require_roles(*EXPORT_ROLES)),
+):
+    return export_controller.bank_book_csv(db, principal, request)
+
+
 @router.get("/listings.csv")
 def listings_csv(
     request: Request,

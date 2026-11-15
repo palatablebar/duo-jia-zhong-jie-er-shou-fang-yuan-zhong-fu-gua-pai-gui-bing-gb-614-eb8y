@@ -17,6 +17,15 @@ def to_csv(headers: Sequence[str], rows: Iterable[Sequence[object]]) -> bytes:
     return (BOM + buffer.getvalue()).encode("utf-8")
 
 
+def to_csv_document(rows: Iterable[Sequence[object]]) -> bytes:
+    """整份文档（口径注释行 + 表头 + 数据）统一写出，BOM 落在首行之前。"""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    for row in rows:
+        writer.writerow(["" if value is None else value for value in row])
+    return (BOM + buffer.getvalue()).encode("utf-8")
+
+
 def csv_response_headers(filename: str) -> dict[str, str]:
     return {
         "Content-Disposition": f'attachment; filename="{filename}"',

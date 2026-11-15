@@ -96,7 +96,8 @@ export const reviewsPage = {
               canExport
                 ? `<button class="btn sm ghost" id="export-reviews">复核 CSV</button>
                    <button class="btn sm ghost" id="export-listings">挂牌 CSV</button>
-                   <button class="btn sm ghost accent" id="export-clusters">归并簇 CSV</button>`
+                   <button class="btn sm ghost" id="export-clusters">归并簇 CSV</button>
+                   <button class="btn sm accent" id="export-bank">银行清单 CSV</button>`
                 : '<span class="mono muted">只读角色不能导出</span>'
             }
           </div>
@@ -129,13 +130,15 @@ export const reviewsPage = {
           ? `<section class="panel">
               <div class="panel-head"><h2>导出与口径</h2><span class="meta">CSV · UTF-8 BOM</span></div>
               <div class="panel-body" style="display:grid;gap:10px">
-                <p class="note">归并簇 CSV 含面积众数、价格中位、价差、离散度、风险分与两个算法命中的挂牌编号；挂牌明细 CSV 同时保留采集原文与归一结果，方便银行侧复核口径。</p>
+                <p class="note">归并簇 CSV 含面积众数、价格中位、价差、离散度、风险分与两个算法命中的挂牌编号；挂牌明细 CSV 同时保留采集原文、采集分诊与补正批次，方便银行侧复核口径。</p>
                 <div class="kv">
-                  <dt>挂牌数</dt><dd class="mono">${esc(overview.listing_total)} 条</dd>
+                  <dt>挂牌数</dt><dd class="mono">${esc(overview.listing_total)} 条（完整 ${esc((overview.stage || {}).complete ?? 0)} · 待补 ${esc(overview.incomplete_total ?? 0)} · 不合规 ${esc(overview.invalid_total ?? 0)}）</dd>
+                  <dt>可入簇 / 撤回</dt><dd class="mono">${esc(overview.eligible_total ?? 0)} 条 · 撤回 ${esc(overview.withdrawn_total ?? 0)} 条</dd>
                   <dt>归并簇</dt><dd class="mono">${esc(overview.cluster_total)} 个（多成员 ${esc(overview.multi_cluster_total)}）</dd>
                   <dt>去重率</dt><dd class="mono">${esc(pct(overview.dedup_rate))}</dd>
                   <dt>风险簇</dt><dd class="mono">${esc(overview.risk_total)} 个 · 待复核 ${esc(overview.pending_total)} 张</dd>
                 </div>
+                <p class="note"><b>银行清单口径</b>：文件头标注覆盖中介范围与待补数量；仅收录完整、在售、未撤回且已入簇的房源，待补 / 不合规 / 已撤回记录一律不出现。</p>
               </div>
             </section>`
           : ''
@@ -172,6 +175,7 @@ export const reviewsPage = {
       }
     };
     view.querySelector('#export-clusters')?.addEventListener('click', () => download('/api/exports/clusters.csv', 'clusters.csv', '归并簇清单'));
+    view.querySelector('#export-bank')?.addEventListener('click', () => download('/api/exports/bank-book.csv', 'bank-book.csv', '银行清单'));
     view.querySelector('#export-listings')?.addEventListener('click', () => download('/api/exports/listings.csv', 'listings.csv', '挂牌明细'));
     view.querySelector('#export-reviews')?.addEventListener('click', () => download('/api/exports/reviews.csv', 'reviews.csv', '复核单'));
     const fold = view.querySelector('#audit-fold');

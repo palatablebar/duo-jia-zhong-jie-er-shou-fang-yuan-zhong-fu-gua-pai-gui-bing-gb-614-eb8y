@@ -1,7 +1,7 @@
 """中介渠道服务：登记、采集统计、启用状态。"""
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from src.constants.enums import AGENCY_KIND_LABELS
@@ -11,7 +11,16 @@ from src.utils.errors import AppError, not_found
 from src.utils.timeutil import iso_utc
 
 
-def serialize(agency: Agency, listing_count: int = 0, last_listing_at=None) -> dict:
+def serialize(
+    agency: Agency,
+    listing_count: int = 0,
+    last_listing_at=None,
+    *,
+    incomplete_count: int = 0,
+    invalid_count: int = 0,
+    complete_count: int = 0,
+    withdrawn_count: int = 0,
+) -> dict:
     return {
         "id": agency.id,
         "code": agency.code,
@@ -24,6 +33,10 @@ def serialize(agency: Agency, listing_count: int = 0, last_listing_at=None) -> d
         "config": agency.config or {},
         "enabled": agency.enabled,
         "listing_count": listing_count,
+        "complete_count": complete_count,
+        "incomplete_count": incomplete_count,
+        "invalid_count": invalid_count,
+        "withdrawn_count": withdrawn_count,
         "last_synced_at": iso_utc(agency.last_synced_at),
         "last_listing_at": iso_utc(last_listing_at),
         "created_at": iso_utc(agency.created_at),
@@ -32,9 +45,27 @@ def serialize(agency: Agency, listing_count: int = 0, last_listing_at=None) -> d
 
 def listing_stats(db: Session) -> dict[int, dict]:
     rows = db.execute(
-        select(Listing.agency_id, func.count(Listing.id), func.max(Listing.captured_at)).group_by(Listing.agency_id)
+        select(
+            Listing.agency_id,
+            func.count(Listing.id),
+            func.max(Listing.captured_at),
+            func.sum(case((Listing.ingest_stage == "complete", 1), else_=0)),
+            func.sum(case((Listing.ingest_stage == "incomplete", 1), else_=0)),
+            func.sum(case((Listing.ingest_stage == "invalid", 1), else_=0)),
+            func.sum(case((Listing.withdrawn_at.is_not(None), 1), else_=0)),
+        ).group_by(Listing.agency_id)
     ).all()
-    return {agency_id: {"count": count, "last_at": last_at} for agency_id, count, last_at in rows}
+    return {
+        agency_id: {
+            "count": count,
+            "last_at": last_at,
+            "complete": complete or 0,
+            "incomplete": incomplete or 0,
+            "invalid": invalid or 0,
+            "withdrawn": withdrawn or 0,
+        }
+        for agency_id, count, last_at, complete, incomplete, invalid, withdrawn in rows
+    }
 
 
 def list_agencies(
@@ -62,7 +93,16 @@ def list_agencies(
     stats = listing_stats(db)
     return {
         "items": [
-            serialize(row, stats.get(row.id, {}).get("count", 0), stats.get(row.id, {}).get("last_at")) for row in rows
+            serialize(
+                row,
+                stats.get(row.id, {}).get("count", 0),
+                stats.get(row.id, {}).get("last_at"),
+                complete_count=stats.get(row.id, {}).get("complete", 0),
+                incomplete_count=stats.get(row.id, {}).get("incomplete", 0),
+                invalid_count=stats.get(row.id, {}).get("invalid", 0),
+                withdrawn_count=stats.get(row.id, {}).get("withdrawn", 0),
+            )
+            for row in rows
         ],
         "total": total,
         "limit": limit,

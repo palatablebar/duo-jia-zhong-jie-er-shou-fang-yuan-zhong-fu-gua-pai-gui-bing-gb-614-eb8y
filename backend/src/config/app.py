@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config.database import engine, wait_for_db
+from src.config.database import wait_for_db
 from src.config.settings import settings
 from src.middlewares.audit_logger import AuditMiddleware
 from src.middlewares.auth import AuthMiddleware
@@ -19,10 +19,10 @@ logger = logging.getLogger(f"{settings.app_name}.app")
 
 
 def _bootstrap_database() -> None:
-    from src.models import Base  # noqa: WPS433 - 延迟导入避免循环
+    from src.config.schema_bootstrap import ensure_schema  # noqa: WPS433 - 延迟导入避免循环
 
     wait_for_db()
-    Base.metadata.create_all(bind=engine)
+    ensure_schema()
 
 
 def _run_seed_once() -> None:

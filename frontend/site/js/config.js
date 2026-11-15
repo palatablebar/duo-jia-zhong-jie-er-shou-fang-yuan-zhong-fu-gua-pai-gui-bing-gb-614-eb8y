@@ -19,9 +19,10 @@ export const BRAND = {
 export const NAV = [
   { to: '#/overview', no: '01', label: '总览', permission: 'overview:read' },
   { to: '#/agencies', no: '02', label: '中介与采集', permission: 'agency:read' },
-  { to: '#/listings', no: '03', label: '挂牌明细', permission: 'listing:read' },
-  { to: '#/clusters', no: '04', label: '归并簇', permission: 'property:read' },
-  { to: '#/reviews', no: '05', label: '复核与导出', permission: 'review:read' },
+  { to: '#/intake', no: '03', label: '采集批次', permission: 'intake:read' },
+  { to: '#/listings', no: '04', label: '挂牌明细', permission: 'listing:read' },
+  { to: '#/clusters', no: '05', label: '归并簇', permission: 'property:read' },
+  { to: '#/reviews', no: '06', label: '复核与导出', permission: 'review:read' },
 ];
 
 export const ROLE_LABELS = {
@@ -32,20 +33,30 @@ export const ROLE_LABELS = {
 
 export const PERMISSIONS = {
   admin: [
-    'overview:read', 'agency:read', 'agency:write', 'listing:read', 'property:read',
+    'overview:read', 'agency:read', 'agency:write',
+    'listing:read', 'listing:write', 'property:read',
+    'intake:read', 'intake:write',
     'run:read', 'run:create', 'review:read', 'review:write', 'export:read', 'audit:read',
   ],
   analyst: [
-    'overview:read', 'agency:read', 'listing:read', 'property:read',
+    'overview:read', 'agency:read',
+    'listing:read', 'listing:write', 'property:read',
+    'intake:read', 'intake:write',
     'run:read', 'run:create', 'review:read', 'review:write', 'export:read',
   ],
-  viewer: ['overview:read', 'agency:read', 'listing:read', 'property:read', 'run:read', 'review:read'],
+  viewer: [
+    'overview:read', 'agency:read', 'listing:read', 'property:read',
+    'intake:read', 'run:read', 'review:read',
+  ],
 };
 
 export const ENUMS = {
   riskLevel: { high: '高风险', medium: '中风险', low: '低风险', none: '正常' },
   riskTag: { bait: '钓鱼价', stale: '僵尸挂牌', spread: '价格离散' },
   listingStatus: { active: '在售', sold: '已成交未下架', off_market: '已下架' },
+  ingestStage: { complete: '完整', incomplete: '待补', invalid: '不合规' },
+  batchStatus: { received: '已接收', processed: '已处理', failed: '处理失败' },
+  correctionStatus: { applied: '已应用', rejected: '已驳回' },
   agencyKind: { broker: '中介门店', platform: '信息平台', feed: '数据服务商' },
   runStatus: { queued: '排队中', running: '执行中', success: '成功', partial: '部分成功', failed: '失败' },
   reviewStatus: { pending: '待复核', confirmed: '已确认', dismissed: '已驳回' },
@@ -63,6 +74,10 @@ export function riskTone(level) {
 
 export function statusTone(status) {
   return { active: 'ok', sold: 'warn', off_market: '' }[status] ?? '';
+}
+
+export function stageTone(stage) {
+  return { complete: 'ok', incomplete: 'warn', invalid: 'danger' }[stage] ?? '';
 }
 
 export function reviewTone(status) {

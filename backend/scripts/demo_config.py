@@ -1,7 +1,9 @@
 """演示账号与种子数据集（确定性生成，不依赖数据库）。
 
-数据集口径（与 batch-plan gb-614 验收一致）：
-  9 家中介 × 60 条挂牌 = 540 条原始挂牌 → 386 个房源簇（41 个多成员簇）；
+数据集口径（与 docs/design-2026-11-15 采集分诊与银行清单.md 一致）：
+  9 家中介 × 60 条挂牌 = 540 条原始挂牌；
+  采集分诊后 536 完整 / 2 待补 / 2 不合规，仅 536 条完整记录参与归并，
+  得到 382 个房源簇（41 个多成员簇）；
   其中「翠湖名邸 3-2-1 89.5㎡」在 4 家中介交叉命中、价差 12 万；
   1 个簇含 2 条钓鱼价（低于簇中位 11% 以上）；5 条僵尸挂牌（>180 天且 0 带看）。
 """
@@ -149,6 +151,15 @@ SPECIAL_PRICES = [5_980_000, 6_020_000, 6_060_000, 6_100_000]
 BAIT_PRICES = [5_280_000, 5_320_000, 5_980_000, 6_020_000, 6_060_000]
 PRICE_JITTER = [0.0, 0.004, -0.003, 0.007, -0.006]
 
+# 采集分诊演示脏数据（均落在单成员簇，不影响 41 个多成员簇与风险口径）：
+#   201 楼层缺失（仍完整，可入簇）、202 价格面议（待补）、250 面积待核实（待补）、
+#   260 面积越界（不合规）、270 小区缺失（不合规）。
+DIRTY_FLOOR_INDEX = 201
+DIRTY_PRICE_INDEX = 202
+DIRTY_AREA_PENDING_INDEX = 250
+DIRTY_AREA_INVALID_INDEX = 260
+DIRTY_COMMUNITY_INVALID_INDEX = 270
+
 
 def community_of(index: int) -> str:
     return COMMUNITIES[index % len(COMMUNITIES)]
@@ -233,8 +244,8 @@ def build_listings() -> tuple[list[dict], list[dict]]:
                 status = "sold"
                 listed_days = 150 + slot % 45
                 views = 2 + slot % 9
-            elif slot % 41 == 7:
-                status = "off_market"
+            # 撤回（off_market / withdrawn）场景由服务层测试覆盖，seed 不内置，
+            # 避免下架成员改变 41 个多成员簇与算法 B 的风险口径。
 
             if index in STALE_CLUSTER_INDEXES:
                 listed_days = 220 + index % 40
@@ -243,12 +254,22 @@ def build_listings() -> tuple[list[dict], list[dict]]:
                 floor_raw = "暂无数据"
             if index == DIRTY_PRICE_INDEX:
                 price_raw = "价格面议"
+            if index == DIRTY_AREA_PENDING_INDEX:
+                area_raw = "面积待核实"
+            if index == DIRTY_AREA_INVALID_INDEX:
+                area_raw = "9999㎡"
+            if index == DIRTY_COMMUNITY_INVALID_INDEX:
+                community_raw_value = ""
+            else:
+                community_raw_value = None
 
             members.append(
                 {
                     "agency_code": agency["code"],
                     "lid": lid,
-                    "community_raw": COMMUNITY_VARIANTS[slot % len(COMMUNITY_VARIANTS)].format(c=community),
+                    "community_raw": community_raw_value
+                    if community_raw_value is not None
+                    else COMMUNITY_VARIANTS[slot % len(COMMUNITY_VARIANTS)].format(c=community),
                     "layout_raw": layout_raw,
                     "area_raw": area_raw,
                     "price_raw": price_raw,
@@ -278,7 +299,7 @@ def build_listings() -> tuple[list[dict], list[dict]]:
         )
     listings = [member for cluster in clusters for member in cluster["members"]]
     assert len(listings) == 540, len(listings)
-    assert len(clusters) == 386, len(clusters)
+    assert len(clusters) == 386, len(clusters)  # 真值簇 386；其中 4 个脏单成员簇被分诊闸口拦截，落库后为 382 个房源簇
     assert sum(1 for cluster in clusters if cluster["size"] > 1) == 41
     return clusters, listings
 

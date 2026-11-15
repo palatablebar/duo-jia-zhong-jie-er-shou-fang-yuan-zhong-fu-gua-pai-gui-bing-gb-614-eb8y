@@ -21,20 +21,23 @@ ROLE_DUTIES: dict[str, str] = {
 PERMISSIONS: dict[str, set[str]] = {
     Role.ADMIN.value: {
         "agency:read", "agency:write",
-        "listing:read", "property:read",
+        "listing:read", "listing:write", "property:read",
+        "intake:read", "intake:write",
         "run:read", "run:create",
         "review:read", "review:write",
         "export:read", "audit:read", "overview:read",
     },
     Role.ANALYST.value: {
         "agency:read",
-        "listing:read", "property:read",
+        "listing:read", "listing:write", "property:read",
+        "intake:read", "intake:write",
         "run:read", "run:create",
         "review:read", "review:write",
         "export:read", "overview:read",
     },
     Role.VIEWER.value: {
-        "agency:read", "listing:read", "property:read", "run:read", "review:read", "overview:read",
+        "agency:read", "listing:read", "property:read",
+        "intake:read", "run:read", "review:read", "overview:read",
     },
 }
 
@@ -43,6 +46,7 @@ RUN_CREATE_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 REVIEW_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 EXPORT_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 AUDIT_ROLES = (Role.ADMIN.value,)
+INTAKE_WRITE_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 READ_ROLES = (Role.ADMIN.value, Role.ANALYST.value, Role.VIEWER.value)
 
 

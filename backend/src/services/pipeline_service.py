@@ -1,6 +1,8 @@
-"""归并流水线：归一（②）→ 实体解析（③④）→ 风险识别（⑤）→ 落库。
+"""归并流水线：归一（②）→ 采集分诊 → 实体解析（③④，仅完整在售记录）→ 风险识别（⑤）→ 落库。
 
 纯后端计算，确定性；同一批原始挂牌两次执行得到完全相同的簇集合与 golden record。
+待补（incomplete）、不合规（invalid）与已撤回（off_market / withdrawn_at）记录不参与
+blocking / 相似度 / 并查集，原文与归一结果仍全量留档；补正为完整后下次重算自动重新入列。
 """
 from __future__ import annotations
 
@@ -9,13 +11,14 @@ import time
 
 from sqlalchemy import func, select
 
+from src.constants.enums import IngestStage
 from src.constants.limits import SIMILARITY_THRESHOLD
 from src.models.agency import Agency
 from src.models.listing import Listing
 from src.models.match_run import MatchRun
 from src.models.property import Property
 from src.models.review import Review
-from src.services import entity_resolution, normalizer, risk_rules
+from src.services import entity_resolution, intake_service, normalizer, risk_rules
 from src.utils.timeutil import iso_utc, utcnow
 
 LISTING_FIELDS = (
@@ -33,19 +36,6 @@ def cluster_key_of(agency_code: str, lid: str) -> str:
     return f"{agency_code}:{lid}"
 
 
-def _apply_normalized(listing: Listing, norm: dict) -> None:
-    listing.community_norm = norm["community_norm"]
-    listing.layout_norm = norm["layout_norm"]
-    listing.area_num = norm["area_num"]
-    listing.price_num = norm["price_num"]
-    listing.floor_num = norm["floor_num"]
-    listing.floor_total = norm["floor_total"]
-    listing.floor_band = norm["floor_band"]
-    listing.orientation_norm = norm["orientation_norm"]
-    listing.title_tokens = norm["title_tokens"]
-    listing.parse_flags = norm["parse_flags"]
-
-
 def run_pipeline(db, run: MatchRun, threshold: float = SIMILARITY_THRESHOLD) -> dict:
     started = time.perf_counter()
     listings = list(db.scalars(select(Listing).order_by(Listing.id)).all())
@@ -57,20 +47,48 @@ def run_pipeline(db, run: MatchRun, threshold: float = SIMILARITY_THRESHOLD) -> 
             "status": "partial",
         }
 
-    raw_rows = [{field: getattr(listing, field) for field in LISTING_FIELDS} for listing in listings]
-    normalized = [normalizer.normalize_listing(raw) for raw in raw_rows]
-    for listing, norm in zip(listings, normalized, strict=True):
-        _apply_normalized(listing, norm)
+    # 1) 全量刷新归一结果与采集分诊（原文不动，待补/不合规同样留档）
+    normalized: list[dict] = []
+    for listing in listings:
+        raw = {field: getattr(listing, field) for field in LISTING_FIELDS}
+        norm = normalizer.normalize_listing(raw)
+        intake_service.apply_normalized(listing, norm)
+        stage, defects = intake_service.classify(norm)
+        listing.ingest_stage = stage
+        listing.defect_flags = defects
+        normalized.append(norm)
 
-    agency_ids = [listing.agency_id for listing in listings]
-    result = entity_resolution.resolve(normalized, agency_ids, threshold=threshold)
+    eligible_indexes = [index for index, listing in enumerate(listings) if intake_service.can_merge(listing)]
+    eligible_set = set(eligible_indexes)
+    excluded_indexes = [index for index in range(len(listings)) if index not in eligible_set]
+
+    stage_counts = {IngestStage.COMPLETE.value: 0, IngestStage.INCOMPLETE.value: 0, IngestStage.INVALID.value: 0}
+    for listing in listings:
+        stage_counts[listing.ingest_stage] = stage_counts.get(listing.ingest_stage, 0) + 1
+    withdrawn_count = sum(1 for listing in listings if listing.withdrawn_at is not None)
+
+    # 2) 被拦记录一律脱簇、清风险标签，等待补正后重算；
+    #    记录本轮开始前已在库且没有簇的挂牌（补正后重新入列的候选）
+    previously_unclustered = {listing.id for listing in listings if listing.property_id is None}
+    for index in excluded_indexes:
+        listings[index].property_id = None
+        listings[index].risk_tags = []
+
+    # 3) 只有足以支持归并的记录进入房源簇
+    eligible_norms = [normalized[index] for index in eligible_indexes]
+    eligible_agency_ids = [listings[index].agency_id for index in eligible_indexes]
+    result = entity_resolution.resolve(eligible_norms, eligible_agency_ids, threshold=threshold)
+
+    # 算法输出的成员索引是 eligible_norms 序列内的下标，映射回 listings 全量下标
+    index_map = eligible_indexes
 
     existing = {prop.cluster_key: prop for prop in db.scalars(select(Property)).all()}
     seen_keys: set[str] = set()
     baits = stales = risk_high = risk_medium = 0
+    readmitted = 0
 
     for cluster in result["clusters"]:
-        members = cluster["members"]
+        members = [index_map[position] for position in cluster["members"]]
         member_lids = sorted(
             cluster_key_of(agencies[listings[index].agency_id].code, listings[index].lid) for index in members
         )
@@ -94,6 +112,9 @@ def run_pipeline(db, run: MatchRun, threshold: float = SIMILARITY_THRESHOLD) -> 
         if prop is None:
             prop = Property(cluster_key=key)
             db.add(prop)
+        # 重新入列：本轮簇里有上一轮被拦脱簇的挂牌（补正后重新处理）
+        if any(listings[index].id in previously_unclustered for index in members):
+            readmitted += 1
         prop.community = golden["community"]
         prop.layout = golden["layout"]
         prop.area_mode = golden["area_mode"]
@@ -135,22 +156,37 @@ def run_pipeline(db, run: MatchRun, threshold: float = SIMILARITY_THRESHOLD) -> 
         elif prop.risk_level == "medium":
             risk_medium += 1
 
+    # 先落稳本轮全部簇与成员归属，再剪旧簇：autoflush=False 下避免剪枝查询读到过期 property_id
+    db.flush()
     pruned = _prune_orphans(db, seen_keys)
 
-    metrics = dict(result["metrics"])
-    metrics.update(
-        {
-            "baits": baits,
-            "stales": stales,
-            "risk_high": risk_high,
-            "risk_medium": risk_medium,
-            "risk_total": risk_high + risk_medium,
-            "pruned_clusters": pruned,
-            "duration_ms": int((time.perf_counter() - started) * 1000),
-        }
-    )
+    algo_metrics = dict(result["metrics"])
+    metrics = {
+        "listings": len(listings),
+        "eligible": len(eligible_indexes),
+        "excluded": len(excluded_indexes),
+        "complete": stage_counts.get(IngestStage.COMPLETE.value, 0),
+        "incomplete": stage_counts.get(IngestStage.INCOMPLETE.value, 0),
+        "invalid": stage_counts.get(IngestStage.INVALID.value, 0),
+        "withdrawn": withdrawn_count,
+        "readmitted": readmitted,
+        "clusters": algo_metrics["clusters"],
+        "multi_clusters": algo_metrics["multi_clusters"],
+        "pairs_scored": algo_metrics["pairs_scored"],
+        "pairs_linked": algo_metrics["pairs_linked"],
+        "threshold": threshold,
+        "dedup_rate": round(1 - algo_metrics["clusters"] / len(eligible_indexes), 4) if eligible_indexes else 0.0,
+        "baits": baits,
+        "stales": stales,
+        "risk_high": risk_high,
+        "risk_medium": risk_medium,
+        "risk_total": risk_high + risk_medium,
+        "pruned_clusters": pruned,
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+    }
     log_lines = [
-        f"输入挂牌 {metrics['listings']} 条，面积归一失败 {sum(1 for n in normalized if n['area_num'] is None)} 条",
+        f"采集挂牌 {metrics['listings']} 条：完整 {metrics['complete']} / 待补 {metrics['incomplete']} / 不合规 {metrics['invalid']}，撤回 {withdrawn_count} 条",
+        f"分诊闸口拦截 {metrics['excluded']} 条（不入簇、原文留档），参与归并 {metrics['eligible']} 条，补正后重新入列 {readmitted} 条",
         f"blocking 候选对 {metrics['pairs_scored']} 组，阈值 {threshold:.2f} 连边 {metrics['pairs_linked']} 条",
         f"并查集 + 传递闭包得到 {metrics['clusters']} 个簇，其中多成员簇 {metrics['multi_clusters']} 个，去重率 {metrics['dedup_rate']:.2%}",
         f"算法 B：钓鱼价 {baits} 条、僵尸挂牌 {stales} 条，高风险簇 {risk_high} 个、中风险簇 {risk_medium} 个",

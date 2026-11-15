@@ -172,7 +172,7 @@ export const clustersPage = {
                 <span class="mono">${esc(run.run_no)}</span>
                 <span>${esc(run.trigger_label)}</span>
                 <span class="muted">${esc(run.cluster_count)} 簇 / ${esc(run.multi_count)} 多成员 · 风险 ${esc(run.risk_count)} · ${esc(pct(run.dedup_rate))}</span>
-                <span class="mono muted">${esc((run.metrics || {}).duration_ms ?? '—')} ms</span>
+                <span class="mono muted">入列 ${esc((run.metrics || {}).eligible ?? '—')} · 拦截 ${esc((run.metrics || {}).excluded ?? '—')} · 重入 ${esc((run.metrics || {}).readmitted ?? '—')} · ${esc((run.metrics || {}).duration_ms ?? '—')} ms</span>
               </div>`,
             )
             .join('')

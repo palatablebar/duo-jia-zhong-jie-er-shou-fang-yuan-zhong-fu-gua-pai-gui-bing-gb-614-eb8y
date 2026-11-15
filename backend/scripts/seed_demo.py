@@ -1,8 +1,9 @@
-"""幂等 seed：3 账号 / 9 中介 / 540 条挂牌 / 2 次归并重算 / 386 个房源簇 / 6 张复核单。
+"""幂等 seed：3 账号 / 9 中介 / 540 条挂牌 / 2 次归并重算 / 382 个房源簇 / 6 张复核单。
 
 自然键 upsert：
   users.email / agencies.code / listings(agency_id, lid) / match_runs.seed_key / reviews.seed_key / audit_logs.seed_key
 重复执行不新增、不覆盖用户改过的复核结论；SEED_SUMMARY 逐字一致。
+采集分诊：536 完整 / 2 待补 / 2 不合规，待补与不合规记录留档但不入簇。
 """
 from __future__ import annotations
 
@@ -68,7 +69,7 @@ def ensure_agencies(db) -> int:
 
 
 def ensure_listings(db) -> int:
-    """按 (agency_id, lid) 幂等写入 540 条原始挂牌（已存在的不覆盖）。"""
+    """按 (agency_id, lid) 幂等写入 540 条原始挂牌（已存在的不覆盖，原文全量留档）。"""
     agencies = {agency.code: agency for agency in db.scalars(select(Agency)).all()}
     existing = {
         (agency_id, lid)
@@ -76,6 +77,15 @@ def ensure_listings(db) -> int:
     }
     _, rows = build_listings()
     created = 0
+    raw_fields = (
+        "community_raw",
+        "layout_raw",
+        "area_raw",
+        "price_raw",
+        "floor_raw",
+        "orientation_raw",
+        "title",
+    )
     for row in rows:
         agency = agencies.get(row["agency_code"])
         if agency is None:
@@ -97,6 +107,8 @@ def ensure_listings(db) -> int:
                 status=row["status"],
                 listed_days=row["listed_days"],
                 views=row["views"],
+                ingest_batch="seed-baseline",
+                raw_payload={field: row[field] for field in raw_fields},
             )
         )
         existing.add(key)

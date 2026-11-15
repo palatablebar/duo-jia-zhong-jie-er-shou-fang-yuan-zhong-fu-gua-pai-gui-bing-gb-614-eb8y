@@ -1,28 +1,29 @@
 import { api } from '../api.js';
-import { ENUMS, pct, riskTone, wan } from '../config.js';
+import { ENUMS, pct, riskTone, stageTone, wan } from '../config.js';
 import { barList, badge, emptyState, errorBox, errorMessage, esc, fmtTime, trendChart } from '../ui.js';
 
 function heroTags(data) {
+  const stage = data.stage || { complete: 0, incomplete: 0, invalid: 0 };
   return `<div class="hero-tags">
     <div class="price-tag">
       <span class="k">挂牌原文</span>
       <span class="v" data-testid="listing-total">${esc(data.listing_total)}</span>
-      <span class="hint">${esc(data.agency_total)} 家中介的原始挂牌条数</span>
+      <span class="hint">${esc(data.agency_total)} 家中介的原始挂牌条数（全部留档）</span>
     </div>
     <div class="price-tag alt">
-      <span class="k">归并后的房源</span>
-      <span class="v" data-testid="cluster-total">${esc(data.cluster_total)}</span>
-      <span class="hint">多成员簇 ${esc(data.multi_cluster_total)} 个 · 其余为独挂</span>
+      <span class="k">完整 / 可入簇</span>
+      <span class="v" data-testid="eligible-total">${esc(stage.eligible ?? data.listing_total)}</span>
+      <span class="hint">完整 ${esc(stage.complete ?? 0)} 条 · 待补 ${esc(stage.incomplete ?? 0)} · 不合规 ${esc(stage.invalid ?? 0)}</span>
     </div>
     <div class="price-tag">
-      <span class="k">去重率</span>
-      <span class="v" data-testid="dedup-rate">${esc(pct(data.dedup_rate))}</span>
-      <span class="hint">1 − 簇数 / 挂牌数（算法 A 计算）</span>
+      <span class="k">归并后的房源</span>
+      <span class="v" data-testid="cluster-total">${esc(data.cluster_total)}</span>
+      <span class="hint">多成员簇 ${esc(data.multi_cluster_total)} 个 · 仅完整记录参与归并</span>
     </div>
     <div class="price-tag alt">
       <span class="k">风险簇 / 待复核</span>
       <span class="v" data-testid="risk-total">${esc(data.risk_total)}</span>
-      <span class="hint">待复核 ${esc(data.pending_total)} 张 · 算法 B 分诊</span>
+      <span class="hint">待复核 ${esc(data.pending_total)} 张 · 撤回 ${esc(stage.withdrawn ?? 0)} 条</span>
     </div>
   </div>`;
 }
@@ -35,6 +36,8 @@ function coverage(data) {
         <span class="name" title="${esc(item.name)}">${esc(item.name)}</span>
         <div class="track"><div class="fill" style="width:${Math.round((item.listing_count / max) * 100)}%"></div></div>
         <span class="mono" style="text-align:right">${esc(item.listing_count)}</span>
+        <span class="badge ${stageTone('incomplete')}" title="待补条数">补 ${esc(item.incomplete_count || 0)}</span>
+        <span class="badge ${stageTone('invalid')}" title="不合规条数">退 ${esc(item.invalid_count || 0)}</span>
       </div>`,
     )
     .join('')}</div>`;
@@ -89,8 +92,16 @@ export const overviewPage = {
 
       <div class="grid-2">
         <section class="panel">
-          <div class="panel-head"><h2>中介覆盖</h2><span class="meta">${esc(data.agency_total)} 家中介 · 每家 60 条</span></div>
-          <div class="panel-body">${coverage(data)}</div>
+          <div class="panel-head"><h2>中介覆盖</h2><span class="meta">${esc(data.agency_total)} 家中介 · 去重率 ${esc(pct(data.dedup_rate))}</span></div>
+          <div class="panel-body">
+            <div class="chips" style="margin-bottom:10px">
+              <span class="chip">完整 ${esc((data.stage || {}).complete ?? 0)}</span>
+              <span class="chip">待补 ${esc(data.incomplete_total ?? 0)}</span>
+              <span class="chip">不合规 ${esc(data.invalid_total ?? 0)}</span>
+              <span class="chip">撤回 ${esc(data.withdrawn_total ?? 0)}</span>
+            </div>
+            ${coverage(data)}
+          </div>
         </section>
         <section class="panel">
           <div class="panel-head"><h2>风险台账</h2><span class="meta">算法 B</span></div>

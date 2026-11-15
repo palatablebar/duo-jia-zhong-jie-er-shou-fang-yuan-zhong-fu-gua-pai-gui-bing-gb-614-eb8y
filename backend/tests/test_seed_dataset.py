@@ -1,10 +1,14 @@
-"""业务验收：seed 数据集经算法 A/B 之后的口径必须与 batch-plan 一致。"""
+"""业务验收：seed 数据集经采集分诊 + 算法 A/B 之后的口径必须与设计一致。
+
+分诊闸口（intake_service.can_merge）：只有 complete 且未撤回/下架的记录进入房源簇；
+待补（价格面议、面积待核实）与不合规（面积越界、小区缺失）记录原文留档但不入簇。
+"""
 from __future__ import annotations
 
 from collections import Counter
 
 from scripts.demo_config import AGENCIES, build_listings
-from src.services import entity_resolution, normalizer, risk_rules
+from src.services import entity_resolution, intake_service, normalizer, risk_rules
 
 
 def _resolve():
@@ -14,30 +18,70 @@ def _resolve():
         for member in cluster["members"]:
             true_cluster[member["lid"]] = cluster["index"]
     norms = [normalizer.normalize_listing(row) for row in listings]
-    agency_ids = [AGENCIES.index(next(a for a in AGENCIES if a["code"] == row["agency_code"])) for row in listings]
-    return clusters, listings, norms, entity_resolution.resolve(norms, agency_ids), true_cluster
+    stages = [intake_service.classify(norm) for norm in norms]
+    eligible = [
+        index
+        for index, row in enumerate(listings)
+        if stages[index][0] == "complete" and row["status"] != "off_market"
+    ]
+    agency_ids = [
+        AGENCIES.index(next(a for a in AGENCIES if a["code"] == listings[index]["agency_code"]))
+        for index in eligible
+    ]
+    result = entity_resolution.resolve([norms[index] for index in eligible], agency_ids)
+    return clusters, listings, norms, stages, eligible, result, true_cluster
 
 
 def test_dataset_shape():
-    _clusters, listings, _norms, _result, _truth = _resolve()
+    _clusters, listings, _norms, _stages, _eligible, _result, _truth = _resolve()
     assert len(listings) == 540
     assert sorted(Counter(row["agency_code"] for row in listings).values()) == [60] * 9
 
 
+def test_ingest_stage_split():
+    _clusters, listings, norms, stages, eligible, _result, _truth = _resolve()
+    stage_counter = Counter(stage for stage, _ in stages)
+    assert stage_counter["complete"] == 536
+    assert stage_counter["incomplete"] == 2  # 价格面议 + 面积待核实
+    assert stage_counter["invalid"] == 2  # 面积越界 + 小区缺失
+    # 待补缺项
+    pending = {listings[index]["lid"]: stages[index][1] for index in range(len(listings)) if stages[index][0] == "incomplete"}
+    assert all("price_missing" in flags or "area_missing" in flags for flags in pending.values())
+    # 不合规缺项
+    invalid_flags = [flags for stage, flags in stages if stage == "invalid"]
+    assert any("area_out_of_range" in flags for flags in invalid_flags)
+    assert any("community_missing" in flags for flags in invalid_flags)
+    # 只有完整记录参与归并
+    assert len(eligible) == 536
+    assert all(stages[index][0] == "complete" for index in eligible)
+
+
 def test_seed_dataset_clusters():
-    _clusters, listings, _norms, result, truth = _resolve()
-    assert result["metrics"]["listings"] == 540
-    assert result["metrics"]["clusters"] == 386
+    _clusters, listings, _norms, _stages, eligible, result, truth = _resolve()
+    assert result["metrics"]["listings"] == 536
+    assert result["metrics"]["clusters"] == 382
     assert result["metrics"]["multi_clusters"] == 41
-    # 每个预测簇都只含同一套真值房源（没有过度合并）
+    # 每个预测簇都只含同一套真值房源（缺项没有把相邻户型串成一套）
     for cluster in result["clusters"]:
-        assert len({truth[listings[index]["lid"]] for index in cluster["members"]}) == 1
-    # 真值簇数量与预测一致（没有漏并）
-    assert len({truth[row["lid"]] for row in listings}) == 386
+        assert len({truth[listings[eligible[index]]["lid"]] for index in cluster["members"]}) == 1
+    # 4 条被拦记录没有对应任何簇
+    assert len(eligible) + 4 == len(listings)
+
+
+def test_excluded_listings_never_block_into_clusters():
+    _clusters, listings, _norms, stages, eligible, result, _truth = _resolve()
+    blocked_lids = {listings[index]["lid"] for index in range(len(listings)) if index not in eligible}
+    assert len(blocked_lids) == 4
+    clustered_lids = {
+        listings[eligible[index]]["lid"]
+        for cluster in result["clusters"]
+        for index in cluster["members"]
+    }
+    assert blocked_lids.isdisjoint(clustered_lids)
 
 
 def test_special_cluster_cross_agency():
-    _clusters, _listings, _norms, result, _truth = _resolve()
+    _clusters, _listings, _norms, _stages, _eligible, result, _truth = _resolve()
     matched = [
         cluster
         for cluster in result["clusters"]
@@ -53,20 +97,20 @@ def test_special_cluster_cross_agency():
 
 
 def test_seed_dataset_risk_profile():
-    clusters, listings, norms, result, _truth = _resolve()
+    _clusters, listings, norms, _stages, eligible, result, _truth = _resolve()
     risky = []
     baits = stales = 0
     for cluster in result["clusters"]:
         members = [
             {
-                "id": index,
-                "lid": listings[index]["lid"],
-                "price_num": norms[index]["price_num"],
-                "listed_days": listings[index]["listed_days"],
-                "views": listings[index]["views"],
-                "status": listings[index]["status"],
+                "id": position,
+                "lid": listings[eligible[position]]["lid"],
+                "price_num": norms[eligible[position]]["price_num"],
+                "listed_days": listings[eligible[position]]["listed_days"],
+                "views": listings[eligible[position]]["views"],
+                "status": listings[eligible[position]]["status"],
             }
-            for index in cluster["members"]
+            for position in cluster["members"]
         ]
         risk = risk_rules.scan_cluster(members, cluster["golden"])
         if risk["risk_level"] in {"high", "medium"}:

@@ -1100,10 +1100,15 @@ pre.code {
 
 .coverage-row {
   display: grid;
-  grid-template-columns: 148px 1fr 52px;
+  grid-template-columns: 148px 1fr 52px auto auto;
   gap: 10px;
   align-items: center;
   font-size: var(--fs-sm);
+}
+
+.coverage-row .badge {
+  white-space: nowrap;
+  font-size: var(--fs-xs);
 }
 
 .coverage-row .name {
